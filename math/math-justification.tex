@@ -1,0 +1,274 @@
+\documentclass[12pt,letterpaper]{article}  % letterpaper is US standard (8.5" x 11")
+
+% Essential packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{bm}
+\usepackage{mathtools}
+\usepackage{etoolbox}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{parskip}  % Removes paragraph indentation and adds space between paragraphs
+\usepackage{float}
+
+% Page layout
+\geometry{
+    letterpaper,  % Options include:
+    % letterpaper (8.5" x 11")
+    % legalpaper (8.5" x 14")
+    % a4paper (210mm x 297mm)
+    % a5paper (148mm x 210mm)
+    % b5paper (176mm x 250mm)
+    % executive (7.25" x 10.5")
+    margin=2cm
+}
+
+% Custom styling
+\definecolor{linkcolor}{RGB}{0, 90, 160}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=linkcolor,
+    urlcolor=linkcolor
+}
+
+% Document info
+\title{Counterbalance Matching for Causal Inference}
+\author{JP \& Dylan Small}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Mathematical Justification}
+
+\subsection*{Problem Setup}
+
+Let
+\begin{itemize}
+    \item[-] $Y_i$: a scalar outcome of interest
+    \item[-] $X_i \in \mathbb{R}^p$: observed baseline covariates, which we balance by matching
+    \item[-] $U_i \in \mathbb{R}$: unmeasured confounder we hope to get information about
+    \item[-] $Z_i \in \{0, 1\}$: treatment indicator
+\end{itemize}
+and consider the following data-generating model:
+\begin{align*}
+    q_i = \mathbb{P}(Z_i = 1 \mid X_i, U_i) &= g(\alpha + X_i^T \beta + \gamma U_i),\ \beta \in \mathbb{R}^p \\
+    \intertext{where $g$ is the logistic function defined as:}
+    g(x) &= \frac{\exp(x)}{1 + \exp(x)} \\
+    \intertext{Then define a linear outcome surface as:}
+    \mathbb{E}[Y_i \mid X_i, U_i, Z_i] &= \tau Z_i + X_i^T \psi + \theta U_i
+\end{align*}
+As usual, we are interested in $\tau$, the causal effect of $Z$ on $Y$, which we can write as:
+\begin{equation*}
+    \tau = \mathbb{E}[Y_i \mid Z_i = 1] - \mathbb{E}[Y_i \mid Z_i = 0]
+\end{equation*}
+However, whenever $\gamma \neq 0$ and $\theta \neq 0$, then $U$ both predicts treatment $Z$ and affects outcome $Y$, and we have our usual problem of unmeasured confounding. From here on, we will assume mean/fine balance in $X$, and define our fitted propensity score compactly as:
+\begin{equation*}
+    \pi_i = \mathbb{P}(Z_i = 1 \mid X_i) = g(\alpha + X_i^T \beta)
+\end{equation*}
+
+\subsection*{Defining Surprise Scores}
+
+Consider the propensity-residual score, defined as:
+\begin{equation*}
+    S_i = Z_i - \pi_i
+\end{equation*}
+We call this quantity a \textbf{surprise score} because it measures how much the treatment assignment deviates from the propensity score. Note that for control units $i \in \mathcal{C}$, $S_i$ is always negative, and for treatment units $i \in \mathcal{T}$, $S_i$ is always positive. Note that in the absence of unmeasured confounding, we have the following:
+\begin{align*}
+    \mathbb{E}[S_i \mid X_i, U_i = 0] &= \mathbb{E}[Z_i - \pi_i \mid X_i, U_i = 0] \\
+    &= \mathbb{E}[Z_i \mid X_i, U_i = 0] - \mathbb{E}[\pi_i \mid X_i, U_i = 0] \\
+    &= (q_i \mid U_i = 0) - \pi_i \\
+    &= g(\alpha + X_i^T \beta) - g(\alpha + X_i^T \beta) \\
+    &= 0
+\end{align*}
+We express the absolute surprise as:
+\begin{equation*}
+    s_i = |S_i| = |Z_i - \pi_i|
+\end{equation*}
+which is always non-negative and measures the absolute deviation of the treatment assignment from the propensity score. Next we will prove that surprise score is a proxy for the unmeasured confounder $U_i$.
+
+\subsection*{Surprise Scores as Proxies for Unmeasured Confounding}
+
+Consider the expected value of the surprise score, which we can write as:
+\begin{align*}
+    \mathbb{E}[S_i \mid X_i, U_i] &= \mathbb{E}[Z_i - \pi_i \mid X_i, U_i] \\
+    &= \mathbb{E}[Z_i \mid X_i, U_i] - \mathbb{E}[\pi_i \mid X_i, U_i] \\
+    \intertext{Then since we know that $Z_i$ is Bernoulli($q_i$), we can write:}
+    \mathbb{E}[S_i \mid X_i, U_i] &= q_i - \pi_i \\
+    &= g(\alpha + X_i^T \beta + \gamma U_i) - g(\alpha + X_i^T \beta) \\
+    &= g(\eta_i) - g(t_i)
+\end{align*}
+Now consider the Taylor expansion of $g(\eta_i)$ around $t_i$:
+\begin{align*}
+    g(\eta_i) &= g(t_i) + g'(t_i) (\eta_i - t_i) + \frac{1}{2} g''(\mathcal{\xi}) (\eta_i - t_i)^2,\ \mathcal{\xi} \in [t_i, \eta_i]
+\end{align*}
+Then it follows that:
+\begin{align*}
+    \mathbb{E}[S_i \mid X_i, U_i] &= g(t_i) + g'(t_i) (\eta_i - t_i) + \frac{1}{2} g''(\mathcal{\xi}) (\eta_i - t_i)^2 - g(t_i) \\
+    &= g'(t_i) (\eta_i - t_i) + \frac{1}{2} g''(\mathcal{\xi}) (\eta_i - t_i)^2
+    \intertext{Note that $\eta_i - t_i = \gamma U_i$, so we can write:}
+    \mathbb{E}[S_i \mid X_i, U_i] &= g'(t_i) \gamma U_i + \frac{1}{2} g''(\mathcal{\xi}) (\gamma U_i)^2
+\end{align*}
+Define the quadratic term in the expansion above as:
+\begin{equation*}
+    R_i = \frac{1}{2} g''(\mathcal{\xi}) (\gamma U_i)^2
+\end{equation*}
+From here, we note the following for the logistic function:
+\begin{equation*}
+    0 \leq g'(x) \leq \frac{1}{4}, \quad | g''(x) | \leq  \frac{1}{4}
+\end{equation*}
+Then it follows that
+\begin{align*}
+    0 \leq R_i &\leq \frac{1}{8} |\gamma U_i|^2 \\
+    \intertext{And when $|\gamma U_i| \leq 1$, we have:}
+    \frac{R_i}{g'(t_i) |\gamma U_i|} &\leq \frac{\frac{1}{8} |\gamma U_i|}{\frac{1}{4} |\gamma U_i|} = \frac{1}{2}
+\end{align*}
+So the quadratic error term is at most 50\% of the linear term in the practical range of $\gamma U_i$, and we can write:
+\begin{align*}
+    \mathbb{E}[S_i \mid X_i, U_i] &= q_i - \pi_i \approx g'(t_i) \gamma U_i \\
+    \intertext{Rearranging for $U_i$ and taking absolute values, we have:}
+    |U_i| &\approx \frac{|q_i - \pi_i|}{|\gamma| g'(t_i)}
+\end{align*}
+Since we know that $0 < g'(x) \leq \frac{1}{4}$ for the logistic function, it follows that $\frac{1}{g'(t_i)} \geq 4$. Therefore, we have a lower bound on the magnitude of the unmeasured confounder:
+\begin{equation*}
+    |U_i| \gtrsim \frac{4}{|\gamma|} |q_i - \pi_i|
+\end{equation*}
+This shows that the magnitude of $U_i$ is proportional to the magnitude of the expected surprise. Hoeffding's inequality tells us that the observed surprise, $S_i = Z_i - \pi_i$, will be close to its expectation, $q_i - \pi_i$. Using $S_i$ as a proxy for its expectation, we arrive at the main result:
+\begin{align*}
+    |U_i| &\gtrsim \frac{4}{|\gamma|} |S_i| \\
+    &\gtrsim \frac{4}{|\gamma|} s_i
+\end{align*}
+Thus, the magnitude of the observable surprise score $s_i = |S_i|$ is a proxy for the magnitude of the unmeasured confounder $|U_i|$.
+
+Then when we select a subset of units $i$ with $s_i = |S_i| \geq \Lambda$, we have that:
+\begin{align*}
+    |U_i| &\gtrsim \frac{4 \Lambda}{|\gamma|}
+\end{align*}
+So selecting units with high surprise is approximately equivalent (up to a constant factor) to selecting units with large unmeasured confounder.
+
+\subsection*{Effect on the Covariance that Drives Hidden Bias}
+
+Rubin's asymptotic linear bias formula for a matched-pair estimator (1973) is:
+\begin{equation*}
+    \text{Bias}(\widehat{\tau_0}) = \theta \text{Cov}(U, Z \mid X)
+\end{equation*}
+He proved that after balancing the covariates $X$ in the matched-pair estimator, the only remaining covariance is between the unmeasured confounder $U$ and the treatment indicator $Z$. We re-express this variance in pair language. Denote the within-pair distance in $U$ for pair $i$ as:
+\begin{equation*}
+    \Delta U_i = U_{i, \mathcal{T}} - U_{i, \mathcal{C}}
+\end{equation*}
+Then since we know that $Z_{i, \mathcal{T}} = 1$ and $Z_{i, \mathcal{C}} = 0$, we have that:
+\begin{equation*}
+    \text{Cov}(U, Z \mid X) = \frac{1}{2}\text{Cov}(\Delta U_i \mid X_i)
+\end{equation*}
+By proof that JP needs to add here, we have that
+\begin{equation*}
+    \text{Cov}(\Delta U_i \mid |S_i| \geq \Lambda)
+\end{equation*}
+is increasing in $\Lambda$. This means counter-balancing inflates the covariance which betrays hidden bias while preserving unbiasedness for observed $X$. So hidden bias is most detectable when we select focal pairs with high surprise.
+
+\subsection*{Information-Theoretic Approach}
+
+Define the per-pair mutual information between treatment and the latent factor $U$ given $X$ as:
+\begin{equation*}
+    I(U; Z \mid X) = \mathbb{E}\left[ \log \frac{\mathbb{P}(Z\mid U, X)}{\mathbb{P}(Z \mid X)} \right]
+\end{equation*}
+Then we have that since $g$ is monotone and $S$ is sufficient for treatment assignment given $X$, we have that:
+\begin{equation*}
+    I(U; Z \mid X, |S| \geq \Lambda)
+\end{equation*}
+is increasing in $\Lambda$. This means that when we counter-balance, we maximize the information about $U$ we can get from studying the $F$ focal pairs.
+
+\subsection*{Our Algorithm}
+
+\paragraph{Inputs.}
+\begin{itemize}[leftmargin=1.3em]
+    \item[-] Treated index set $\mathcal{T}$ and donor‐pool controls $\mathcal{C}$.
+    \item[-] Covariate matrix $X$, fitted propensities $\pi$, surprise scores $S_i = Z_i-\pi_i$.
+    \item[-] Distance metric $d_{ij}=\|X_i-X_j\|_\Sigma^2$ (Mahalanobis or user-chosen).
+    \item[-] Balance constraints $\{B_k\}_{k=1}^K$ (mean balance, fine balance, calipers,~…).
+    \item[-] Hyper-parameters: \textbf{F} (number of focal pairs), $\Lambda$ (surprise threshold).
+\end{itemize}
+
+\paragraph{Step A: Pre-screen the candidate pool.}
+Retain only units whose absolute surprise exceeds a safety margin
+\[
+|S_i|\;\ge\;\Lambda+\varepsilon_\delta,
+\quad
+\varepsilon_\delta=\sqrt{\tfrac12\log\!\frac{2}{\delta}}
+\]
+so that $|S_i|$ exceeds its expectation with probability at most~$\delta$
+(Hoeffding bound).
+
+\paragraph{Step B: Find the tightest admissible similarity radius $\kappa^\star$.}
+Repeat until convergence (\emph{bisection search}):
+\begin{enumerate}[label=\arabic*.]
+    \item Guess $\kappa$; build the graph that links each $i\in\mathcal{T}$ to controls
+          $j\in\mathcal{C}$ with $d_{ij}\le\kappa$.
+    \item Ask a max-flow or assignment solver whether
+          \emph{(i)} all balance constraints $B_k$ are feasible and
+          \emph{(ii)} at least $F$ treated units in that graph satisfy
+          $|S_i|\ge\Lambda$.
+    \item Shrink or enlarge~$\kappa$ accordingly.
+\end{enumerate}
+The result is the smallest $\kappa^\star$ that still admits a feasible match with
+\textbf{F} high-surprise pairs.  (This is Rosenbaum–Garfinkel
+\emph{threshold search}.)
+
+\paragraph{Step C: Penalised assignment for the global match.}
+Create the augmented cost matrix
+\[
+\tilde d_{ij}\;=\;
+\begin{cases}
+    d_{ij}, & d_{ij}\le\kappa^\star\text{ and }|S_i|\ge\Lambda;\\[2pt]
+    d_{ij}+M, & \text{otherwise},
+\end{cases}
+\qquad
+M\gg\max\limits_{ij}d_{ij},
+\]
+then solve the cardinality/assignment problem
+
+\[
+\min_{\mu:\mathcal{T}\to\mathcal{C}}
+        \sum_{i\in\mathcal{T}}\tilde d_{i\,\mu(i)}
+\quad
+\text{s.\,t. } B_k\;\;(k=1,\dots,K).
+\]
+
+The penalty $M$ forces the optimiser to use exactly the \(F\) admissible
+high-surprise pairs found in Step B while choosing the cheapest controls for all
+other treated units.
+
+\paragraph{Step D: Outputs.}
+\begin{itemize}[leftmargin=1.3em]
+    \item \emph{Full matched sample}: all treated units plus their chosen controls.
+    \item \emph{F focal pairs}: the \(F\) pairs that triggered the \(|S|\ge\Lambda\) rule
+          (highlighted for qualitative follow-up).
+    \item Diagnostics: covariate balance table, distribution of $d_{ij}$ inside and
+          outside the focal subset, and $\Gamma$-sensitivity value.
+\end{itemize}
+
+\paragraph{Computation notes.}
+The threshold search (Step B) runs in $O(\log R)$ iterations where
+$R=\max_{ij}d_{ij}-\min_{ij}d_{ij}$; each iteration calls a standard Hungarian
+or max-flow routine.  In practice, with $n\lesssim10^4$, the full pipeline
+completes in seconds on a laptop.
+
+\paragraph{Tuning hints.}
+\begin{itemize}[leftmargin=1.3em]
+    \item Start with \(F\approx20\) and increase if qualitative capacity allows.
+    \item Pick $\Lambda$ so that $\kappa^\star$ falls near the 10th percentile of all distances—
+          that keeps focal pairs both “close” and “surprising”.
+    \item Sensitivity‐analysis software: \texttt{sensitivitymw} or \texttt{rbounds}.
+\end{itemize}
+
+
+
+\end{document}
