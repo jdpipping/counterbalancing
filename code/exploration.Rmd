@@ -1,0 +1,308 @@
+---
+title: "Data Exploration"
+author: "JP & Dylan Small"
+date: "`r Sys.Date()`"
+output: html_document
+description: "Exploratory data analysis for counterbalance matching"
+---
+
+```{r load-packages, include = F}
+library(naniar)
+library(striprtf)
+library(tidyverse)
+library(VIM)
+```
+
+```{r functions, include = F}
+
+# get variable info from the rtf data dictionary
+extract_variable_info = function(rtf_lines) {
+  # filter lines that contain variable definitions
+  var_lines = rtf_lines[str_detect(rtf_lines, "Variable = ")]
+  
+  # extract variable info using tidyverse
+  map_dfr(var_lines, function(line) {
+    # extract variable name and label
+    var_name = str_extract(line, "Variable = ([^\\s]+)") |> 
+      str_remove("Variable = ")
+    
+    var_label = str_extract(line, "Variable label = ([^\\r\\n]+)") |> 
+      str_remove("Variable label = ")
+    
+    # only process if we have both name and label
+    if (is.na(var_name) || is.na(var_label) || var_name == "" || var_label == "") {
+      return(tibble(variable_name = NA_character_, variable_label = NA_character_, sweep = NA_integer_))
+    }
+    
+    # determine sweep from variable label (first digit 0-3 at start)
+    sweep = if (str_detect(var_label, "PMS")) {
+      0L  # PMS indicates birth sweep
+    } else if (str_detect(var_label, "0-3D")) {
+      NA_integer_  # 0-3D indicates global variable
+    } else {
+      str_extract(var_label, "[0-3]") |> 
+        as.integer()
+    }
+    
+    # return as data frame row
+    tibble(
+      variable_name = var_name,
+      variable_label = var_label,
+      sweep = sweep
+    )
+  }) |>
+    # remove rows with missing information
+    filter(!is.na(variable_name), !is.na(variable_label))
+}
+```
+
+# Data Processing
+
+We read in and clean the two data sources below: the NCDS data for every sweep through age 16 (confounders and treatment) and their age 42 information (outcome). Then, we unify the datasets and identify participants who are eligible for the study.
+
+## NCDS Childhood
+
+The NCDS childhood data contains sweeps at birth, age 7, age 11, and age 16. The age 11 and 16 data is of specific interest to us (confounders and treatment, respectively), so we will filter out the age 7 data and then proceed by cleaning and exploring the data.
+
+```{r childhood-load, message = F}
+# load age 0, 7, 11, 16 data
+ncds_childhood = read_tsv("../data/ncds-childhood/tab/ncds0123.tab")
+# preview
+head(ncds_childhood)
+
+# load data dictionary
+childhood_dict = read_rtf("../data/ncds-childhood/mrdoc/ukda_data_dictionaries/ncds0123_ukda_data_dictionary.rtf")
+```
+
+```{r childhood-info, message = F}
+# extract variable information
+childhood_info = extract_variable_info(childhood_dict)
+
+# display summary by sweep
+cat("variables by sweep:\n")
+for (sweep in 0:3) {
+  sweep_vars = childhood_info[childhood_info$sweep == sweep, ]
+  cat(sprintf("sweep %d (%s): %d variables\n", 
+              sweep, 
+              c("birth", "age 7", "age 11", "age 16")[sweep + 1],
+              nrow(sweep_vars)))
+}
+
+# debug: check for NA sweeps
+cat("Total variables extracted:", nrow(childhood_info), "\n")
+cat("Variables with NA sweep:", sum(is.na(childhood_info$sweep)), "\n")
+cat("Variables with valid sweep:", sum(!is.na(childhood_info$sweep)), "\n")
+
+# show first few variables from each sweep
+for (sweep in 0:3) {
+  sweep_vars = childhood_info[!is.na(childhood_info$sweep) & childhood_info$sweep == sweep, ]
+  if (nrow(sweep_vars) > 0) {
+    cat(sprintf("\nsweep %d variables (first 5):\n", sweep))
+    print(head(sweep_vars, 5))
+  }
+}
+
+# create final variable mapping
+final_var_map = childhood_info[!is.na(childhood_info$sweep), c("variable_name", "sweep", "variable_label")]
+
+# summary by sweep
+cat("\nfinal variable count by sweep:\n")
+for (sweep in 0:3) {
+  sweep_vars = final_var_map[final_var_map$sweep == sweep, ]
+  cat(sprintf("sweep %d (%s): %d variables\n", 
+              sweep, 
+              c("birth", "age 7", "age 11", "age 16")[sweep + 1],
+              nrow(sweep_vars)))
+}
+
+# get variables for each sweep
+birth_vars = final_var_map[final_var_map$sweep == 0, "variable_name"] |> pull()
+age7_vars = final_var_map[final_var_map$sweep == 1, "variable_name"] |> pull()
+age11_vars = final_var_map[final_var_map$sweep == 2, "variable_name"] |> pull()
+age16_vars = final_var_map[final_var_map$sweep == 3, "variable_name"] |> pull()
+
+# display summary
+cat("\nvariables available in data by sweep:\n")
+cat("birth variables:", length(birth_vars), "\n")
+cat("age 7 variables:", length(age7_vars), "\n") 
+cat("age 11 variables:", length(age11_vars), "\n")
+cat("age 16 variables:", length(age16_vars), "\n")
+
+# show some example variables from each sweep
+cat("\nexample variables from each sweep:\n")
+for (sweep in 0:3) {
+  vars = final_var_map[final_var_map$sweep == sweep, "variable_name"]
+  sweep_name = c("birth", "age 7", "age 11", "age 16")[sweep + 1]
+  cat(sprintf("%s (first 5): %s\n", sweep_name, 
+              paste(head(vars, 5), collapse = ", ")))
+}
+
+# create filtered datasets for each sweep
+birth_data = ncds_childhood[, c("ncdsid", "n622", birth_vars)]
+age7_data = ncds_childhood[, c("ncdsid", "n622", age7_vars)]
+age11_data = ncds_childhood[, c("ncdsid", "n622", age11_vars)]
+age16_data = ncds_childhood[, c("ncdsid", "n622", age16_vars)]
+
+# basic summary of each sweep's data
+cat("\ndata summary by sweep:\n")
+cat("birth data dimensions:", dim(birth_data), "\n")
+cat("age 7 data dimensions:", dim(age7_data), "\n")
+cat("age 11 data dimensions:", dim(age11_data), "\n")
+cat("age 16 data dimensions:", dim(age16_data), "\n")
+```
+
+## NCDS Age 42
+
+The NCDS age 42 data is of interest to us because it contains the outcome variable we're interested in: years spent in full-time education. We load and clean the data, but we will wait to explore the data until after we've set up the observational study.
+
+```{r age42-load, message = F}
+# load age 42 data
+ncds_42 = read_tsv("../data/ncds-42/tab/ncds6_v2.tab")
+# preview
+head(ncds_42)
+
+# load age 42 data dictionary
+age42_dict = read_rtf("../data/ncds-42/mrdoc/ncds6_v2_ukda_data_dictionary.rtf")
+```
+
+```{r age42-info, message = F}
+# extract variable information (all variables are sweep 4 - age 42)
+age42_info = extract_variable_info(age42_dict) |>
+  mutate(sweep = 4L)  # all variables are from age 42 sweep
+
+# display summary
+cat("age 42 variables:", nrow(age42_info), "\n")
+cat("first 5 variables:\n")
+print(head(age42_info, 5))
+
+# get age 42 variables
+age42_vars = age42_info$variable_name
+
+# display summary
+cat("\nage 42 variables available in data:", length(age42_vars), "\n")
+cat("example variables (first 5):", paste(head(age42_vars, 5), collapse = ", "), "\n")
+```
+
+## Unified Dataset
+
+Now that we have the childhood and age 42 data, we can unify them into a single dataset and identify which units are eligible for the study.
+
+```{r merge-datasets, message = F}
+# merge childhood and age 42 datasets by participant id
+ncds_merged = ncds_childhood |>
+  # drop out participants missing from either set
+  inner_join(ncds_42, by = "ncdsid")
+
+# display summary of merged dataset
+merge_summary = tibble(
+  description = c("childhood data participants", "age 42 data participants", "merged dataset participants", "missing from age 42", "only in age 42"),
+  count = c(nrow(ncds_childhood), nrow(ncds_42), nrow(ncds_merged), 
+            nrow(ncds_childhood |> anti_join(ncds_42, by = "ncdsid")),
+            nrow(ncds_42 |> anti_join(ncds_childhood, by = "ncdsid")))
+)
+
+print("Dataset merge summary:")
+print(merge_summary)
+
+# create a summary of participation across sweeps
+participation_summary = ncds_merged |>
+  summarise(
+    total_participants = n(),
+    with_birth_data = sum(!is.na(n622)),  # sex variable from birth
+    with_age7_data = sum(!is.na(n94)),    # example age 7 variable
+    with_age11_data = sum(!is.na(n2region)), # region at age 11
+    with_age16_data = sum(!is.na(n3region)), # region at age 16
+    with_age42_data = sum(!is.na(ncdsid))    # all have ncdsid
+  ) |>
+  pivot_longer(everything(), names_to = "sweep", values_to = "participants") |>
+  mutate(sweep = str_remove(sweep, "with_") |> str_replace("_data", ""))
+
+print("Participation summary by sweep:")
+print(participation_summary)
+
+print("First few rows of merged dataset (first 10 columns):")
+print(head(ncds_merged[, 1:10]))
+```
+
+# Data Exploration
+
+Now, we will explore the *un-merged* dataset of eligible participants to ensure we don't bias our findings.
+
+```{r eligible-participants, message = F}
+# identify eligible participants (those with data in both childhood and age 42)
+eligible_participant_ids = ncds_merged$ncdsid
+
+print("Eligible participants summary:")
+print(paste("Total eligible participants:", length(eligible_participant_ids)))
+
+# filter childhood dataset for eligible participants
+ncds_childhood_eligible = ncds_childhood |>
+  filter(ncdsid %in% eligible_participant_ids)
+
+# preview
+head(ncds_childhood_eligible)
+```
+
+```{r missingness-analysis, message = F}
+# Missing data patterns analysis
+print("=== MISSING DATA ANALYSIS ===")
+
+# 1. Missingness map
+print("Missingness map for key variables:")
+key_vars = c("n622", "n2region", "n3region", "n0region", "n1region")
+missing_data = ncds_childhood_eligible |> select(all_of(key_vars))
+
+# Create missingness map
+missing_plot = vis_miss(missing_data, cluster = TRUE)
+print(missing_plot)
+
+# 2. Missing percentage by variable
+missing_summary = missing_data |>
+  summarise(across(everything(), ~sum(is.na(.))/n()*100)) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_pct")
+
+print("\nMissing percentage by variable:")
+print(missing_summary)
+
+# 3. Missing patterns
+print("\nMissing patterns (first 10 patterns):")
+missing_patterns = aggr(missing_data, plot = FALSE)
+print(head(missing_patterns$tabComb, 10))
+```
+
+```{r key-variables-exploration, message = F}
+# Key variables exploration for causal inference
+print("=== KEY VARIABLES EXPLORATION ===")
+
+# 1. Treatment variables (age 16)
+treatment_candidates = age16_vars[str_detect(age16_vars, "education|school|work|job|employment|smoking|drinking", ignore.case = TRUE)]
+print("Potential treatment variables (age 16):")
+print(treatment_candidates)
+
+# 2. Confounder variables (age 11)
+confounder_candidates = age11_vars[str_detect(age11_vars, "region|class|income|family|parent|socio|aspiration", ignore.case = TRUE)]
+print("\nPotential confounder variables (age 11):")
+print(head(confounder_candidates, 10))
+
+# 3. Outcome variables (age 42)
+outcome_candidates = age42_vars[str_detect(age42_vars, "education|school|qualification|degree", ignore.case = TRUE)]
+print("\nPotential outcome variables (age 42):")
+print(head(outcome_candidates, 10))
+
+# 4. Basic demographics
+demographics = ncds_childhood_eligible |>
+  summarise(
+    total = n(),
+    male = sum(n622 == 1, na.rm = TRUE),
+    female = sum(n622 == 2, na.rm = TRUE),
+    missing_sex = sum(is.na(n622))
+  ) |>
+  mutate(
+    male_pct = male / total,
+    female_pct = female / total,
+    missing_sex_pct = missing_sex / total
+  )
+
+print("\nDemographics of eligible participants:")
+print(demographics)
+```
