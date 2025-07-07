@@ -2,8 +2,10 @@
 title: "Data Dive"
 author: "JP & Dylan Small"
 date: "`r Sys.Date()`"
-output: html_document
-description: "Exploratory data analysis for counterbalance matching"
+output:
+  pdf_document: default
+  html_document: default
+description: Exploratory data analysis for counterbalance matching
 ---
 
 ```{r load-packages, include = F}
