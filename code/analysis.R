@@ -99,28 +99,40 @@ f = 25
 matched_data = matched_data |>
   mutate(surprise_score = abs(!!sym(treatment_var) - distance))
 
-# get top f and bottom f most surprising individuals
-cat("\n=== top", f, "most surprising individuals ===\n")
-top_individuals = matched_data |>
+# max and min propensity
+matched_data |> 
+  reframe(
+    min = min(distance),
+    max = max(distance)
+  )
+
+# get top f overall most surprising individuals
+cat("\n=== top", f, "overall most surprising individuals ===\n")
+top_overall = matched_data |>
   arrange(desc(surprise_score)) |>
   head(f)
-print(top_individuals |> select(ncdsid, !!treatment_var, distance, surprise_score))
+print(top_overall |> select(ncdsid, !!treatment_var, distance, surprise_score))
 
-cat("\n=== bottom", f, "least surprising individuals ===\n")
-bottom_individuals = matched_data |>
-  arrange(surprise_score) |>
+# get top f treatment surprises (treated individuals only)
+cat("\n=== top", f, "treatment surprises ===\n")
+top_treatment = matched_data |>
+  filter(!!sym(treatment_var) == 1) |>
+  arrange(desc(surprise_score)) |>
   head(f)
-print(bottom_individuals |> select(ncdsid, !!treatment_var, distance, surprise_score))
+print(top_treatment |> select(ncdsid, !!treatment_var, distance, surprise_score))
 
-# save datasets for analysis
-write_csv(top_individuals, "../data/processed/top_surprising_individuals.csv")
-write_csv(bottom_individuals, "../data/processed/bottom_surprising_individuals.csv")
-cat("\nsaved top and bottom", f, "surprising individuals to csv files\n")
+# get top f control surprises (control individuals only)
+cat("\n=== top", f, "control surprises ===\n")
+top_control = matched_data |>
+  filter(!!sym(treatment_var) == 0) |>
+  arrange(desc(surprise_score)) |>
+  head(f)
+print(top_control |> select(ncdsid, !!treatment_var, distance, surprise_score))
 
 # get top f most surprising pairs (sum of surprise scores)
 cat("\n=== top", f, "most surprising pairs (sum of surprise scores) ===\n")
 pair_surprise = matched_data |>
-  group_by(weights) |>
+  group_by(subclass) |>
   mutate(
     pair_surprise_sum = sum(surprise_score),
     pair_size = n()
@@ -128,9 +140,23 @@ pair_surprise = matched_data |>
   ungroup() |>
   filter(pair_size == 2) |>
   arrange(desc(pair_surprise_sum)) |>
-  select(ncdsid, !!treatment_var, distance, surprise_score, weights, pair_surprise_sum) |>
+  select(ncdsid, !!treatment_var, distance, surprise_score, weights, subclass, pair_surprise_sum) |>
   head(f * 2)  # show both members of top f pairs
 print(pair_surprise)
+
+# get least surprising individuals
+cat("\n=== least surprising individuals ===\n")
+least_surprising = matched_data |>
+  arrange(surprise_score) |>
+  head(f)
+print(least_surprising |> select(ncdsid, !!treatment_var, distance, surprise_score))
+
+# save datasets for analysis
+write_csv(top_overall, "top_overall_surprising.csv")
+write_csv(top_treatment, "top_treatment_surprising.csv")
+write_csv(top_control, "top_control_surprising.csv")
+write_csv(least_surprising, "least_surprising.csv")
+cat("\nsaved surprise score datasets to csv files\n")
 
 ########################
 ### OUTCOME ANALYSIS ###
